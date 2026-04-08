@@ -733,7 +733,9 @@ class DynamoDbIntegrationTest {
                         {
                             "Delete": {
                                 "IndexName": "OwnerIndex"
-                            },
+                            }
+                        },
+                        {
                             "Delete": {
                                 "IndexName": "OwnerIndexProj"
                             }
