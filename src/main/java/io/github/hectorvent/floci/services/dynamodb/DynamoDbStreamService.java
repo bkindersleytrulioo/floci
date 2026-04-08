@@ -47,11 +47,16 @@ public class DynamoDbStreamService {
 
     @Inject
     public DynamoDbStreamService(ObjectMapper objectMapper, StorageFactory storageFactory) {
+        this(objectMapper, storageFactory.create("dynamodb", "dynamodb-tables.json",
+                new TypeReference<Map<String, TableDefinition>>() {}));
+    }
+
+    /** Package-private constructor for testing. */
+    DynamoDbStreamService(ObjectMapper objectMapper, StorageBackend<String, TableDefinition> tableStore) {
         this.objectMapper = objectMapper;
-        var tableStore = storageFactory.create("dynamodb", "dynamodb-tables.json",
-                new TypeReference<Map<String, TableDefinition>>() {});
         loadPersistedStreams(tableStore);
     }
+
 
     private void loadPersistedStreams(StorageBackend<String, TableDefinition> tableStore) {
         if (tableStore == null) return;
