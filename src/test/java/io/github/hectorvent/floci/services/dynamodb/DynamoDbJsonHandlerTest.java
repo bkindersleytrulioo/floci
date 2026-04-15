@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.dynamodb.model.AttributeDefinition;
 import io.github.hectorvent.floci.services.dynamodb.model.KeySchemaElement;
@@ -36,17 +35,6 @@ class DynamoDbJsonHandlerTest {
         return service.createTable("Users",
                 List.of(new KeySchemaElement("userId", "HASH")),
                 List.of(new AttributeDefinition("userId", "S")),
-                5L, 5L);
-    }
-
-    private TableDefinition createOrdersTable() {
-        return service.createTable("Orders",
-                List.of(
-                        new KeySchemaElement("customerId", "HASH"),
-                        new KeySchemaElement("orderId", "RANGE")),
-                List.of(
-                        new AttributeDefinition("customerId", "S"),
-                        new AttributeDefinition("orderId", "S")),
                 5L, 5L);
     }
 
