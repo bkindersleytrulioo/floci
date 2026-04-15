@@ -802,6 +802,114 @@ class DynamoDbIntegrationTest {
             .body("__type", equalTo("ResourceNotFoundException"));
     }
 
+    // --- ConsumedCapacity tests ---
+    // These use a dedicated table to avoid ordering dependencies.
+
+    @Test
+    void getItem_withReturnConsumedCapacityTotal_returnsCapacity() {
+        // Create a dedicated table
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.CreateTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "CapacityTest",
+                    "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
+                    "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
+                    "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+                }
+                """)
+        .when().post("/").then().statusCode(200);
+
+        // Put an item
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.PutItem")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "CapacityTest", "Item": {"id": {"S": "a"}, "val": {"S": "hello"}}}
+                """)
+        .when().post("/").then().statusCode(200);
+
+        // GetItem with TOTAL
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.GetItem")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "CapacityTest",
+                    "Key": {"id": {"S": "a"}},
+                    "ReturnConsumedCapacity": "TOTAL"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Item.val.S", equalTo("hello"))
+            .body("ConsumedCapacity.TableName", equalTo("CapacityTest"))
+            .body("ConsumedCapacity.CapacityUnits", notNullValue());
+    }
+
+    @Test
+    void getItem_withoutReturnConsumedCapacity_omitsCapacity() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.GetItem")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "CapacityTest",
+                    "Key": {"id": {"S": "a"}}
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConsumedCapacity", nullValue());
+    }
+
+    @Test
+    void putItem_withReturnConsumedCapacityTotal_returnsCapacity() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.PutItem")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "CapacityTest",
+                    "Item": {"id": {"S": "b"}, "val": {"S": "world"}},
+                    "ReturnConsumedCapacity": "TOTAL"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConsumedCapacity.TableName", equalTo("CapacityTest"))
+            .body("ConsumedCapacity.CapacityUnits", notNullValue());
+    }
+
+    @Test
+    void query_withReturnConsumedCapacityIndexes_returnsTableBreakdown() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.Query")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "CapacityTest",
+                    "KeyConditionExpression": "id = :id",
+                    "ExpressionAttributeValues": {":id": {"S": "a"}},
+                    "ReturnConsumedCapacity": "INDEXES"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConsumedCapacity.TableName", equalTo("CapacityTest"))
+            .body("ConsumedCapacity.CapacityUnits", notNullValue())
+            .body("ConsumedCapacity.Table.CapacityUnits", notNullValue());
+    }
+
     @Test
     @Order(28)
     void updateItemListAppend() {
@@ -1080,6 +1188,134 @@ class DynamoDbIntegrationTest {
             .contentType(DYNAMODB_CONTENT_TYPE)
             .body("""
                 {"TableName": "DeleteAddComboTable"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void updateAndDescribeContinuousBackups() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.CreateTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "ContinuousBackupsTable",
+                    "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+                    "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+                    "BillingMode": "PAY_PER_REQUEST"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DescribeContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "ContinuousBackupsTable"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ContinuousBackupsDescription.ContinuousBackupsStatus", equalTo("ENABLED"))
+            .body("ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus",
+                    equalTo("DISABLED"))
+            .body("ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays",
+                    nullValue());
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.UpdateContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "ContinuousBackupsTable",
+                    "PointInTimeRecoverySpecification": {
+                        "PointInTimeRecoveryEnabled": true
+                    }
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ContinuousBackupsDescription.ContinuousBackupsStatus", equalTo("ENABLED"))
+            .body("ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus",
+                    equalTo("ENABLED"))
+            .body("ContinuousBackupsDescription.PointInTimeRecoveryDescription.RecoveryPeriodInDays",
+                    equalTo(35));
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DescribeContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "ContinuousBackupsTable"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus",
+                    equalTo("ENABLED"));
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DeleteTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "ContinuousBackupsTable"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void updateContinuousBackupsRejectsOutOfRangeRecoveryPeriod() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.CreateTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "ContinuousBackupsValidationTable",
+                    "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+                    "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+                    "BillingMode": "PAY_PER_REQUEST"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.UpdateContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "ContinuousBackupsValidationTable",
+                    "PointInTimeRecoverySpecification": {
+                        "PointInTimeRecoveryEnabled": true,
+                        "RecoveryPeriodInDays": 36
+                    }
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DeleteTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "ContinuousBackupsValidationTable"}
                 """)
         .when()
             .post("/")

@@ -38,13 +38,17 @@ class HealthControllerIntegrationTest {
                 "states": "running",
                 "cloudformation": "running",
                 "acm": "running",
+                "athena": "running",
+                "glue": "running",
+                "firehose": "running",
                 "email": "running",
                 "es": "running",
                 "ec2": "running",
                 "ecs": "running",
                 "appconfig": "running",
                 "appconfigdata": "running",
-                "ecr": "running"
+                "ecr": "running",
+                "tagging": "running"
               },
               "edition": "floci-always-free",
               "version": "dev"

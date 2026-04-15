@@ -216,11 +216,14 @@ public interface EmulatorConfig {
         SecretsManagerServiceConfig secretsmanager();
         ApiGatewayV2ServiceConfig apigatewayv2();
         KinesisServiceConfig kinesis();
+        FirehoseServiceConfig firehose();
         KmsServiceConfig kms();
         CognitoServiceConfig cognito();
         StepFunctionsServiceConfig stepfunctions();
         CloudFormationServiceConfig cloudformation();
         AcmServiceConfig acm();
+        AthenaServiceConfig athena();
+        GlueServiceConfig glue();
         SesServiceConfig ses();
         OpenSearchServiceConfig opensearch();
         Ec2ServiceConfig ec2();
@@ -228,6 +231,7 @@ public interface EmulatorConfig {
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
+        ResourceGroupsTaggingServiceConfig tagging();
     }
 
     interface SsmServiceConfig {
@@ -372,6 +376,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface FirehoseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface KmsServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -399,6 +408,16 @@ public interface EmulatorConfig {
         /** Seconds to wait before transitioning from PENDING_VALIDATION to ISSUED (0 = immediate) */
         @WithDefault("0")
         int validationWaitSeconds();
+    }
+
+    interface AthenaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GlueServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface SesServiceConfig {
@@ -440,6 +459,11 @@ public interface EmulatorConfig {
 
         @WithDefault("256")
         int defaultCpuUnits();
+    }
+
+    interface ResourceGroupsTaggingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface EcrServiceConfig {

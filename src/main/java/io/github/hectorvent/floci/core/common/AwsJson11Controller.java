@@ -3,8 +3,12 @@ package io.github.hectorvent.floci.core.common;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.services.acm.AcmJsonHandler;
+import io.github.hectorvent.floci.services.athena.AthenaJsonHandler;
 import io.github.hectorvent.floci.services.ecr.EcrJsonHandler;
 import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
+import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
+import io.github.hectorvent.floci.services.glue.GlueJsonHandler;
+import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2JsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsHandler;
 import io.github.hectorvent.floci.services.cognito.CognitoJsonHandler;
@@ -48,6 +52,10 @@ public class AwsJson11Controller {
     private final AcmJsonHandler acmJsonHandler;
     private final EcsJsonHandler ecsJsonHandler;
     private final EcrJsonHandler ecrJsonHandler;
+    private final GlueJsonHandler glueJsonHandler;
+    private final AthenaJsonHandler athenaJsonHandler;
+    private final FirehoseJsonHandler firehoseJsonHandler;
+    private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -59,7 +67,10 @@ public class AwsJson11Controller {
                                ApiGatewayV2JsonHandler apigwV2JsonHandler,
                                KmsJsonHandler kmsJsonHandler, CognitoJsonHandler cognitoJsonHandler,
                                AcmJsonHandler acmJsonHandler, EcsJsonHandler ecsJsonHandler,
-                               EcrJsonHandler ecrJsonHandler) {
+                               EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
+                               AthenaJsonHandler athenaJsonHandler,
+                               FirehoseJsonHandler firehoseJsonHandler,
+                               ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler) {
         this.objectMapper = objectMapper;
         this.catalog = catalog;
         this.regionResolver = regionResolver;
@@ -74,6 +85,10 @@ public class AwsJson11Controller {
         this.acmJsonHandler = acmJsonHandler;
         this.ecsJsonHandler = ecsJsonHandler;
         this.ecrJsonHandler = ecrJsonHandler;
+        this.glueJsonHandler = glueJsonHandler;
+        this.athenaJsonHandler = athenaJsonHandler;
+        this.firehoseJsonHandler = firehoseJsonHandler;
+        this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
     }
 
     @POST
@@ -113,6 +128,10 @@ public class AwsJson11Controller {
                 case "acm" -> acmJsonHandler.handle(action, request, region);
                 case "ecs" -> ecsJsonHandler.handle(action, request, region);
                 case "ecr" -> ecrJsonHandler.handle(action, request, region);
+                case "glue" -> glueJsonHandler.handle(action, request, region);
+                case "athena" -> athenaJsonHandler.handle(action, request, region);
+                case "firehose" -> firehoseJsonHandler.handle(action, request, region);
+                case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target

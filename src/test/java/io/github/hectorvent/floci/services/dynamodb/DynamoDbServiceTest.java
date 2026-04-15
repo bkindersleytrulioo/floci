@@ -858,7 +858,6 @@ class DynamoDbServiceTest {
         assertTrue(tagValues.containsAll(Arrays.asList("a", "b")));
     }
 
-
     /**
      * Test update with SET and REMOVE in the same expression.
      * This mimics how the DynamoDB Enhanced Client generates expressions
@@ -1060,4 +1059,449 @@ class DynamoDbServiceTest {
         assertFalse(notifs.has("sms"), "sms should be removed");
     }
 
+    // --- UpdateExpression clause separator tests ---
+    //
+    // The Go AWS SDK v2 expression.Builder joins top-level clauses with '\n',
+    // emitting expressions like "SET #a = :a\nADD #b :b". Each of the cases
+    // below hits a different edge of the clause-boundary / clause-advancement
+    // logic. See GitHub issue #430 for the full repro.
+
+    private void seedCounterItem(String id, long counterValue, String nameValue) {
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", id));
+        initialItem.set("counter", attributeValue("N", Long.toString(counterValue)));
+        initialItem.set("name", attributeValue("S", nameValue));
+        service.putItem("Users", initialItem);
+    }
+
+    private ObjectNode userIdKey(String id) {
+        ObjectNode key = mapper.createObjectNode();
+        key.set("userId", attributeValue("S", id));
+        return key;
+    }
+
+    @Test
+    void updateExpressionAcceptsNewlineBetweenSetAndAdd() {
+        // "SET ... \n ADD ..." — previously both clauses were silently dropped:
+        // applySetClause greedily consumed ":newName\nADD counter :inc" as the
+        // value and failed the lookup, so neither SET nor ADD ran.
+        createUsersTable();
+        seedCounterItem("u1", 1L, "old");
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#n", "name");
+        names.put("#c", "counter");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":inc", attributeValue("N", "5"));
+
+        service.updateItem("Users", userIdKey("u1"), null,
+                "SET #n = :newName\nADD #c :inc", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u1"));
+        assertEquals("new", stored.get("name").get("S").asText(),
+                "SET clause must apply across a newline boundary");
+        assertEquals("6", stored.get("counter").get("N").asText(),
+                "ADD clause must apply across a newline boundary");
+    }
+
+    @Test
+    void updateExpressionAcceptsNewlineBetweenAddAndSet() {
+        createUsersTable();
+        seedCounterItem("u2", 10L, "old");
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#n", "name");
+        names.put("#c", "counter");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":inc", attributeValue("N", "3"));
+
+        service.updateItem("Users", userIdKey("u2"), null,
+                "ADD #c :inc\nSET #n = :newName", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u2"));
+        assertEquals("new", stored.get("name").get("S").asText());
+        assertEquals("13", stored.get("counter").get("N").asText());
+    }
+
+    @Test
+    void updateExpressionAcceptsTabBetweenClauses() {
+        createUsersTable();
+        seedCounterItem("u3", 0L, "old");
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#n", "name");
+        names.put("#c", "counter");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":inc", attributeValue("N", "1"));
+
+        service.updateItem("Users", userIdKey("u3"), null,
+                "SET #n = :newName\tADD #c :inc", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u3"));
+        assertEquals("new", stored.get("name").get("S").asText());
+        assertEquals("1", stored.get("counter").get("N").asText());
+    }
+
+    @Test
+    void updateExpressionAcceptsCrlfBetweenClauses() {
+        createUsersTable();
+        seedCounterItem("u4", 100L, "old");
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#n", "name");
+        names.put("#c", "counter");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":inc", attributeValue("N", "7"));
+
+        service.updateItem("Users", userIdKey("u4"), null,
+                "SET #n = :newName\r\nADD #c :inc", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u4"));
+        assertEquals("new", stored.get("name").get("S").asText());
+        assertEquals("107", stored.get("counter").get("N").asText());
+    }
+
+    @Test
+    void updateExpressionAcceptsThreeNewlineSeparatedClauses() {
+        // Canonical Go SDK shape: SET + ADD + DELETE joined by '\n'.
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u5"));
+        initialItem.set("counter", attributeValue("N", "2"));
+        ObjectNode ss = mapper.createObjectNode();
+        ss.putArray("SS").add("keep").add("drop");
+        initialItem.set("tagsToClear", ss);
+        service.putItem("Users", initialItem);
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#a", "alpha");
+        names.put("#b", "beta");
+        names.put("#c", "counter");
+        names.put("#d", "tagsToClear");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":a", attributeValue("S", "A"));
+        values.set(":b", attributeValue("S", "B"));
+        values.set(":inc", attributeValue("N", "4"));
+        ObjectNode dropSet = mapper.createObjectNode();
+        dropSet.putArray("SS").add("drop");
+        values.set(":d", dropSet);
+
+        service.updateItem("Users", userIdKey("u5"), null,
+                "SET #a = :a, #b = :b\nADD #c :inc\nDELETE #d :d",
+                names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u5"));
+        assertEquals("A", stored.get("alpha").get("S").asText());
+        assertEquals("B", stored.get("beta").get("S").asText());
+        assertEquals("6", stored.get("counter").get("N").asText());
+        assertTrue(stored.has("tagsToClear"), "tagsToClear should still exist");
+        JsonNode remaining = stored.get("tagsToClear").get("SS");
+        assertEquals(1, remaining.size());
+        assertEquals("keep", remaining.get(0).asText());
+    }
+
+    @Test
+    void updateExpressionAcceptsNewlineBetweenRemoveAndSet() {
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u6"));
+        initialItem.set("tempField", attributeValue("S", "bye"));
+        initialItem.set("name", attributeValue("S", "old"));
+        service.putItem("Users", initialItem);
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#t", "tempField");
+        names.put("#n", "name");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+
+        service.updateItem("Users", userIdKey("u6"), null,
+                "REMOVE #t\nSET #n = :newName", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u6"));
+        assertFalse(stored.has("tempField"), "tempField should be removed");
+        assertEquals("new", stored.get("name").get("S").asText());
+    }
+
+    @Test
+    void updateExpressionAcceptsNewlineBetweenDeleteAndAdd() {
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u7"));
+        initialItem.set("counter", attributeValue("N", "10"));
+        ObjectNode ss = mapper.createObjectNode();
+        ss.putArray("SS").add("keep").add("drop");
+        initialItem.set("tags", ss);
+        service.putItem("Users", initialItem);
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#c", "counter");
+        names.put("#tag", "tags");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":inc", attributeValue("N", "2"));
+        ObjectNode dropSet = mapper.createObjectNode();
+        dropSet.putArray("SS").add("drop");
+        values.set(":d", dropSet);
+
+        service.updateItem("Users", userIdKey("u7"), null,
+                "DELETE #tag :d\nADD #c :inc", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u7"));
+        assertEquals("12", stored.get("counter").get("N").asText());
+        JsonNode remaining = stored.get("tags").get("SS");
+        assertEquals(1, remaining.size());
+        assertEquals("keep", remaining.get(0).asText());
+    }
+
+    @Test
+    void updateExpressionAddBeforeSetDoesNotSwallowSetKeywordAtIntraSetComma() {
+        // Regression for Bug 2: before the advancement alignment fix,
+        // applyAddClause preferred the next comma (inside the SET clause's
+        // "b = :b, c = :c") over the SET keyword, consuming the keyword and
+        // dropping the SET entirely.
+        createUsersTable();
+        seedCounterItem("u8", 0L, "old");
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#c", "counter");
+        names.put("#n", "name");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":inc", attributeValue("N", "1"));
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":other", attributeValue("S", "x"));
+
+        service.updateItem("Users", userIdKey("u8"), null,
+                "ADD #c :inc SET #n = :newName, extra = :other", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u8"));
+        assertEquals("1", stored.get("counter").get("N").asText(), "ADD must apply");
+        assertEquals("new", stored.get("name").get("S").asText(), "SET must apply");
+        assertEquals("x", stored.get("extra").get("S").asText(), "second SET assignment must apply");
+    }
+
+    @Test
+    void updateExpressionRemoveBeforeSetDoesNotSwallowSetKeywordAtIntraSetComma() {
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u9"));
+        initialItem.set("tempField", attributeValue("S", "bye"));
+        initialItem.set("name", attributeValue("S", "old"));
+        service.putItem("Users", initialItem);
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#t", "tempField");
+        names.put("#n", "name");
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":other", attributeValue("S", "x"));
+
+        service.updateItem("Users", userIdKey("u9"), null,
+                "REMOVE #t SET #n = :newName, extra = :other", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u9"));
+        assertFalse(stored.has("tempField"), "REMOVE must apply");
+        assertEquals("new", stored.get("name").get("S").asText(), "SET must apply");
+        assertEquals("x", stored.get("extra").get("S").asText(), "second SET assignment must apply");
+    }
+
+    @Test
+    void updateExpressionDeleteBeforeSetDoesNotSwallowSetKeywordAtIntraSetComma() {
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u10"));
+        initialItem.set("name", attributeValue("S", "old"));
+        ObjectNode ss = mapper.createObjectNode();
+        ss.putArray("SS").add("keep").add("drop");
+        initialItem.set("tags", ss);
+        service.putItem("Users", initialItem);
+
+        ObjectNode names = mapper.createObjectNode();
+        names.put("#tag", "tags");
+        names.put("#n", "name");
+        ObjectNode values = mapper.createObjectNode();
+        ObjectNode dropSet = mapper.createObjectNode();
+        dropSet.putArray("SS").add("drop");
+        values.set(":d", dropSet);
+        values.set(":newName", attributeValue("S", "new"));
+        values.set(":other", attributeValue("S", "x"));
+
+        service.updateItem("Users", userIdKey("u10"), null,
+                "DELETE #tag :d SET #n = :newName, extra = :other", names, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u10"));
+        JsonNode remaining = stored.get("tags").get("SS");
+        assertEquals(1, remaining.size());
+        assertEquals("keep", remaining.get(0).asText());
+        assertEquals("new", stored.get("name").get("S").asText());
+        assertEquals("x", stored.get("extra").get("S").asText());
+    }
+
+    @Test
+    void updateExpressionFindsValidKeywordAfterAttributeNameSuffix() {
+        // Regression for the indexOfKeyword loop: an attribute name ending in
+        // a keyword substring ("oldSET") must not mask a following real clause.
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u12"));
+        initialItem.set("oldSET", attributeValue("S", "bye"));
+        service.putItem("Users", initialItem);
+
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":v", attributeValue("S", "hi"));
+
+        service.updateItem("Users", userIdKey("u12"), null,
+                "REMOVE oldSET SET newAttr = :v", null, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u12"));
+        assertFalse(stored.has("oldSET"), "oldSET should be removed");
+        assertEquals("hi", stored.get("newAttr").get("S").asText(),
+                "SET must still be recognised past the oldSET attribute name");
+    }
+
+    @Test
+    void updateExpressionDoesNotMatchKeywordInsideAttributeName() {
+        // False-positive guard for the indexOfKeyword boundary relaxation.
+        // An attribute literally named "prefixSET" must not be treated as a
+        // clause keyword, and a following comma must still split the SET clause.
+        createUsersTable();
+
+        ObjectNode initialItem = mapper.createObjectNode();
+        initialItem.set("userId", attributeValue("S", "u11"));
+        service.putItem("Users", initialItem);
+
+        ObjectNode values = mapper.createObjectNode();
+        values.set(":v1", attributeValue("S", "one"));
+        values.set(":v2", attributeValue("S", "two"));
+
+        service.updateItem("Users", userIdKey("u11"), null,
+                "SET prefixSET = :v1, other = :v2", null, values, "ALL_NEW");
+
+        JsonNode stored = service.getItem("Users", userIdKey("u11"));
+        assertEquals("one", stored.get("prefixSET").get("S").asText());
+        assertEquals("two", stored.get("other").get("S").asText());
+    }
+
+    @Test
+    void queryWithParenthesizedBetweenKeyCondition() {
+        createOrdersTable();
+        service.putItem("Orders", item("customerId", "c1", "orderId", "2026-01-01Z#a"));
+        service.putItem("Orders", item("customerId", "c1", "orderId", "2026-06-15Z#b"));
+        service.putItem("Orders", item("customerId", "c1", "orderId", "2026-12-31Z#c"));
+
+        ObjectNode exprValues = mapper.createObjectNode();
+        exprValues.set(":pk", attributeValue("S", "c1"));
+        exprValues.set(":start", attributeValue("S", "2026-01-01Z#"));
+        exprValues.set(":end", attributeValue("S", "2026-12-31Z#z"));
+
+        var result = service.query("Orders", null, exprValues,
+                "customerId = :pk AND (orderId BETWEEN :start AND :end)", null, null);
+        assertEquals(3, result.items().size(), "parenthesized BETWEEN should work");
+    }
+
+    @Test
+    void queryWithCompactAndBetweenKeyCondition() {
+        createOrdersTable();
+        service.putItem("Orders", item("customerId", "c1", "orderId", "2026-01-01Z#a"));
+        service.putItem("Orders", item("customerId", "c1", "orderId", "2026-06-15Z#b"));
+
+        ObjectNode exprNames = mapper.createObjectNode();
+        exprNames.put("#f0", "customerId");
+        exprNames.put("#f1", "orderId");
+        ObjectNode exprValues = mapper.createObjectNode();
+        exprValues.set(":v0", attributeValue("S", "c1"));
+        exprValues.set(":v1", attributeValue("S", "2026-01-01Z#"));
+        exprValues.set(":v2", attributeValue("S", "2026-12-31Z#z"));
+
+        var result = service.query("Orders", null, exprValues,
+                "(#f0 = :v0)AND(#f1 BETWEEN :v1 AND :v2)", null, null, null, null, null, exprNames, "us-east-1");
+        assertEquals(2, result.items().size(), "compact AND with BETWEEN should work");
+    }
+
+    @Test
+    void updateItemWithNestedDottedPathSetAndRemove() {
+        createOrdersTable();
+        service.putItem("Orders", item("customerId", "c1", "orderId", "o1"));
+
+        ObjectNode exprNames = mapper.createObjectNode();
+        exprNames.put("#details", "details");
+        exprNames.put("#status", "status");
+
+        ObjectNode exprValues = mapper.createObjectNode();
+        exprValues.set(":val", attributeValue("S", "hello"));
+        exprValues.set(":s", attributeValue("S", "active"));
+
+        // SET a nested map field via dotted path: #details.subkey = :val, #status = :s
+        ObjectNode key = mapper.createObjectNode();
+        key.set("customerId", attributeValue("S", "c1"));
+        key.set("orderId", attributeValue("S", "o1"));
+
+        var result = service.updateItem("Orders", key, null,
+                "SET #details.subkey = :val, #status = :s", exprNames, exprValues, "ALL_NEW", null, "us-east-1");
+
+        JsonNode updated = result.newItem();
+        assertNotNull(updated);
+        // status should be set at top level
+        assertEquals("active", updated.get("status").get("S").asText());
+        // details.subkey should be set in a nested map
+        assertNotNull(updated.get("details"), "details map should exist");
+        assertTrue(updated.get("details").has("M"), "details should be a DynamoDB Map");
+        assertEquals("hello", updated.get("details").get("M").get("subkey").get("S").asText());
+
+        // Now REMOVE the nested field
+        result = service.updateItem("Orders", key, null,
+                "REMOVE #details.subkey", exprNames, null, "ALL_NEW", null, "us-east-1");
+
+        updated = result.newItem();
+        // The subkey should be removed from the nested map
+        assertFalse(updated.get("details").get("M").has("subkey"), "subkey should be removed");
+        // status should still be there
+        assertEquals("active", updated.get("status").get("S").asText());
+    }
+
+    @Test
+    void updateItemSetFollowedByRemovePreservesAllAssignments() {
+        // Reproduces the bug where SET's last assignment was lost because findNextComma
+        // consumed into the REMOVE clause's comma-separated list.
+        createOrdersTable();
+        service.putItem("Orders", item("customerId", "c1", "orderId", "o1"));
+
+        ObjectNode exprNames = mapper.createObjectNode();
+        exprNames.put("#a", "fieldA");
+        exprNames.put("#b", "fieldB");
+        exprNames.put("#c", "fieldC");
+        exprNames.put("#d", "fieldD");
+
+        ObjectNode exprValues = mapper.createObjectNode();
+        exprValues.set(":v1", attributeValue("S", "val1"));
+        exprValues.set(":v2", attributeValue("S", "val2"));
+
+        ObjectNode key = mapper.createObjectNode();
+        key.set("customerId", attributeValue("S", "c1"));
+        key.set("orderId", attributeValue("S", "o1"));
+
+        // First, set all four fields
+        service.updateItem("Orders", key, null,
+                "SET #a = :v1, #b = :v1, #c = :v1, #d = :v1", exprNames, exprValues, "NONE", null, "us-east-1");
+
+        // SET last two assignments, then REMOVE two fields (comma-separated)
+        var result = service.updateItem("Orders", key, null,
+                "SET #a = :v1, #b = :v2 REMOVE #c, #d", exprNames, exprValues, "ALL_NEW", null, "us-east-1");
+
+        JsonNode updated = result.newItem();
+        assertNotNull(updated);
+        assertEquals("val1", updated.get("fieldA").get("S").asText(), "fieldA should be set");
+        assertEquals("val2", updated.get("fieldB").get("S").asText(), "fieldB should be set (last SET before REMOVE)");
+        assertNull(updated.get("fieldC"), "fieldC should be removed");
+        assertNull(updated.get("fieldD"), "fieldD should be removed");
+    }
 }
