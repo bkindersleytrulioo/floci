@@ -93,7 +93,7 @@ class DynamoDbJsonHandlerTest {
         exprValues.put(":newVal", attributeValue("S", "newVal"));
 
         JsonNode request = createRequest("Users", key, 
-        "SET changeAttr = :changeVal, SET newAttr = :newVal, REMOVE delAttr",
+        "SET changeAttr = :changeVal,  newAttr = :newVal, REMOVE delAttr",
         null, exprValues, "UPDATED_NEW");
 
         Response response = null;
@@ -133,7 +133,7 @@ class DynamoDbJsonHandlerTest {
         exprValues.put(":newVal", attributeValue("S", "newVal"));
 
         JsonNode request = createRequest("Users", key, 
-        "SET changeAttr = :changeVal, SET newAttr = :newVal, REMOVE delAttr",
+        "SET changeAttr = :changeVal,  newAttr = :newVal, REMOVE delAttr",
         null, exprValues, "UPDATED_OLD");
 
         Response response = null;
@@ -173,7 +173,7 @@ class DynamoDbJsonHandlerTest {
         exprValues.put(":newVal", attributeValue("S", "newVal"));
 
         JsonNode request = createRequest("Users", key, 
-        "SET changeAttr = :changeVal, SET newAttr = :newVal, REMOVE delAttr",
+        "SET changeAttr = :changeVal,  newAttr = :newVal, REMOVE delAttr",
         null, exprValues, "ALL_OLD");
 
         Response response = null;
@@ -215,7 +215,7 @@ class DynamoDbJsonHandlerTest {
         exprValues.put(":newVal", attributeValue("S", "newVal"));
 
         JsonNode request = createRequest("Users", key, 
-        "SET changeAttr = :changeVal, SET newAttr = :newVal, REMOVE delAttr",
+        "SET changeAttr = :changeVal,  newAttr = :newVal, REMOVE delAttr",
         null, exprValues, "ALL_NEW");
 
         Response response = null;
@@ -257,7 +257,7 @@ class DynamoDbJsonHandlerTest {
         exprValues.put(":newVal", attributeValue("S", "newVal"));
 
         JsonNode request = createRequest("Users", key, 
-        "SET changeAttr = :changeVal, SET newAttr = :newVal, REMOVE delAttr",
+        "SET changeAttr = :changeVal,  newAttr = :newVal, REMOVE delAttr",
         null, exprValues, "NONE");
 
         Response response = null;
