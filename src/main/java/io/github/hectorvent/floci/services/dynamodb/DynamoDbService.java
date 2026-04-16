@@ -910,8 +910,7 @@ public class DynamoDbService {
     private void evaluateCondition(JsonNode existingItem, String conditionExpression,
                                     JsonNode exprAttrNames, JsonNode exprAttrValues) {
         if (!matchesFilterExpression(existingItem, conditionExpression, exprAttrNames, exprAttrValues)) {
-            throw new AwsException("ConditionalCheckFailedException",
-                    "The conditional request failed", 400);
+            throw new ConditionalCheckFailedException(existingItem);
         }
     }
 
