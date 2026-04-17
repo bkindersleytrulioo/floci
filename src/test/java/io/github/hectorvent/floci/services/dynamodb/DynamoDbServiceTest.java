@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.dynamodb;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.dynamodb.model.AttributeDefinition;
+import io.github.hectorvent.floci.services.dynamodb.model.ConditionalCheckFailedException;
 import io.github.hectorvent.floci.services.dynamodb.model.KeySchemaElement;
 import io.github.hectorvent.floci.services.dynamodb.model.TableDefinition;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -1503,5 +1504,58 @@ class DynamoDbServiceTest {
         assertEquals("val2", updated.get("fieldB").get("S").asText(), "fieldB should be set (last SET before REMOVE)");
         assertNull(updated.get("fieldC"), "fieldC should be removed");
         assertNull(updated.get("fieldD"), "fieldD should be removed");
+    }
+
+    @Test
+    void updateItemConditionFailedReturnValuesNone() {
+        createOrdersTable();
+    
+        ObjectNode order = item("customerId", "1", "orderId", "sort1", "testAttr", "testVal");
+        ObjectNode key = item("customerId", "1", "orderId", "sort1");
+        service.putItem("Orders", order);
+
+        ObjectNode exprValues = mapper.createObjectNode();
+        ObjectNode newVal = attributeValue("S", "newVal");
+        ObjectNode conditionVal = attributeValue("S", "testVal");
+        exprValues.set(":val", newVal);
+        exprValues.set(":test", conditionVal);
+
+        ConditionalCheckFailedException ex = assertThrows(ConditionalCheckFailedException.class, () -> service.updateItem("Orders", key, null,
+                "SET newAttr = :val",
+                null, exprValues, "NONE", "testAttr <> :test", "us-east-1", "NONE"));
+
+        JsonNode stored = service.getItem("Orders", key);
+        assertNotNull(stored, "item should exist");
+        assertFalse(stored.has("newAttr"), "new attribute should not have been added");
+
+        assertNull(ex.getItem());
+    }
+
+    @Test
+    void updateItemConditionFailedReturnValuesAllOld() {
+        createOrdersTable();
+
+        ObjectNode order = item("customerId", "1", "orderId", "sort1", "testAttr", "testVal");
+        ObjectNode key = item("customerId", "1", "orderId", "sort1");
+        service.putItem("Orders", order);
+
+        ObjectNode exprValues = mapper.createObjectNode();
+        ObjectNode newVal = attributeValue("S", "newVal");
+        ObjectNode conditionVal = attributeValue("S", "testVal");
+        exprValues.set(":val", newVal);
+        exprValues.set(":test", conditionVal);
+
+        ConditionalCheckFailedException ex = assertThrows(ConditionalCheckFailedException.class, () -> service.updateItem("Orders", key, null,
+                "SET newAttr = :val",
+                null, exprValues, "NONE", "testAttr <> :test", "us-east-1", "ALL_OLD"));
+
+        JsonNode stored = service.getItem("Orders", key);
+        assertNotNull(stored, "item should exist");
+        assertFalse(stored.has("newAttr"), "new attribute should not have been added");
+
+        JsonNode returnedItem = ex.getItem();
+        assertNotNull(returnedItem);
+        assertTrue(returnedItem.has("testAttr"), "returned item should have testAttr");
+        assertEquals("testVal", returnedItem.get("testAttr").get("S").asText());
     }
 }
